@@ -1,0 +1,10 @@
+# NUNCA subir secretos al repo
+.streamlit/secrets.toml
+
+# Datos locales / efímeros
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
