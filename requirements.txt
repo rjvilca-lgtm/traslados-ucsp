@@ -3,3 +3,5 @@ pandas
 openpyxl
 Authlib>=1.3.2
 httpx
+gspread>=6.0
+google-auth>=2.28
