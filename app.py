@@ -17,16 +17,17 @@ st.markdown("""
 <style>
 .block-container {max-width: 1500px; padding-top: 1.4rem; padding-bottom: 6.5rem;}
 h1 {letter-spacing:-.6px;}
-.section-kicker {font-size:.75rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#315b9d;margin:.6rem 0 .4rem;}
-.helper {background:#e8f1ff;border-radius:10px;padding:12px 16px;color:#0759a6;margin:0 0 14px 0;font-size:.9rem;}
-.total-box {background:#f7f9fc;border:1px solid #e5e9f0;border-radius:10px;padding:9px 14px;display:inline-block;font-size:.95rem;}
-.sticky-summary {position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #dfe4ea;
-                 padding:12px 4%;z-index:999;box-shadow:0 -4px 14px rgba(16,24,40,.06);}
-.sticky-summary .wrap {max-width:1500px;margin:0 auto;display:flex;align-items:center;gap:28px;flex-wrap:wrap;}
-.sticky-summary .item {font-size:.9rem;color:#475467;}
-.sticky-summary .item b {color:#101828;font-size:1.05rem;}
-.sticky-summary .status-ok {background:#ecfdf3;color:#137a4b;padding:6px 14px;border-radius:20px;font-weight:700;}
-.sticky-summary .status-warn {background:#fef0c7;color:#b54708;padding:6px 14px;border-radius:20px;font-weight:700;}
+.section-kicker {font-size:.75rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#315b9d;margin:.4rem 0 .35rem;}
+.helper {background:#eef4ff;border:1px solid #dbe7ff;border-radius:10px;padding:11px 15px;color:#0759a6;margin:0 0 14px 0;font-size:.88rem;}
+.sticky-summary {position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e4e7ec;
+                 padding:11px 4%;z-index:999;box-shadow:0 -4px 14px rgba(16,24,40,.05);}
+.sticky-summary .wrap {max-width:1500px;margin:0 auto;display:flex;align-items:center;gap:26px;flex-wrap:wrap;}
+.sticky-summary .item {font-size:.88rem;color:#475467;}
+.sticky-summary .item b {color:#101828;font-size:1.02rem;}
+.sticky-summary .status-ok {background:#ecfdf3;color:#137a4b;padding:5px 13px;border-radius:20px;font-weight:700;}
+.sticky-summary .status-warn {background:#fef0c7;color:#b54708;padding:5px 13px;border-radius:20px;font-weight:700;}
+/* data_editor: quitar el ruido visual y redondear */
+div[data-testid="stDataFrame"] {border:1px solid #e4e7ec;border-radius:10px;overflow:hidden;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -36,7 +37,6 @@ def empty_df(n=1):
     return pd.DataFrame(rows, columns=LINE_COLS)
 
 def coerce(df):
-    """Normalize any df to LINE_COLS with correct dtypes."""
     if df is None or len(df) == 0:
         return empty_df(0)
     out = df.copy()
@@ -105,7 +105,7 @@ def parse_table(raw, header_row, next_header=None):
     return drop_empty(pd.DataFrame(valid)) if valid else empty_df(0)
 
 def detect_tipo(raw):
-    """Read the actual 'X' mark next to the option — not the mere presence of a label."""
+    """Lee la marca 'X' junto a la opción — no la mera presencia del texto."""
     options = {"traslado": "Traslado", "ampliación": "Ampliación",
                "ampliacion": "Ampliación", "reducción": "Reducción", "reduccion": "Reducción"}
     for i in range(min(len(raw), 15)):
@@ -113,8 +113,7 @@ def detect_tipo(raw):
         label = row[0].lower()
         matched = next((v for k, v in options.items() if label.startswith(k)), None)
         if matched:
-            marked = any(cell.lower() in ("x", "✔", "✓", "sí", "si", "1") for cell in row[1:])
-            if marked:
+            if any(cell.lower() in ("x", "✔", "✓", "sí", "si", "1") for cell in row[1:]):
                 return matched
     return "Traslado"
 
@@ -122,37 +121,31 @@ def read_excel(uploaded):
     xls = pd.ExcelFile(uploaded)
     sheet = "Formato" if "Formato" in xls.sheet_names else xls.sheet_names[0]
     raw = pd.read_excel(uploaded, sheet_name=sheet, header=None)
-
     header_rows = [i for i, row in raw.iterrows()
                    if any(str(x).strip().lower() == "centro de costo" for x in row.tolist())]
-
     origen = destino = empty_df(0)
     if header_rows:
         origen = parse_table(raw, header_rows[0], header_rows[1] if len(header_rows) > 1 else None)
         if len(header_rows) > 1:
             destino = parse_table(raw, header_rows[1], None)
-
     meta = {}
     for key, r in [("solicitante", 6), ("cargo", 7), ("unidad", 8)]:
         try:
             meta[key] = "" if pd.isna(raw.iloc[r, 3]) else str(raw.iloc[r, 3])
         except Exception:
             meta[key] = ""
+    return {"tipo": detect_tipo(raw), "origen": origen, "destino": destino, "meta": meta}, sheet
 
-    tipo = detect_tipo(raw)
-    return {"tipo": tipo, "origen": origen, "destino": destino, "meta": meta}, sheet
-
-# ------------------------------------------------------------------ excel export (round-trip)
+# ------------------------------------------------------------------ excel export
 def export_datos_entrada():
-    """Flat sheet ready to feed DATOS_ENTRADA."""
     tipo = st.session_state.tipo
     rows = []
     if tipo == "Traslado":
-        for side, key in [("Origen", "origen_df"), ("Destino", "destino_df")]:
-            for _, r in drop_empty(st.session_state[key]).iterrows():
+        for side, key in [("Origen", "_origen_current"), ("Destino", "_destino_current")]:
+            for _, r in drop_empty(st.session_state.get(key, empty_df(0))).iterrows():
                 rows.append({"Tipo": tipo, "Lado": side, **{c: r[c] for c in LINE_COLS}})
     else:
-        for _, r in drop_empty(st.session_state.single_df).iterrows():
+        for _, r in drop_empty(st.session_state.get("_single_current", empty_df(0))).iterrows():
             rows.append({"Tipo": tipo, "Lado": tipo, **{c: r[c] for c in LINE_COLS}})
     df = pd.DataFrame(rows, columns=["Tipo", "Lado"] + LINE_COLS)
     buf = io.BytesIO()
@@ -164,21 +157,23 @@ def export_datos_entrada():
 def init_state():
     if "tipo" not in st.session_state:
         st.session_state.tipo = "Traslado"
-    if "origen_df" not in st.session_state:
-        st.session_state.origen_df = coerce(pd.DataFrame([
+    if "origen_seed" not in st.session_state:
+        st.session_state.origen_seed = coerce(pd.DataFrame([
             {"Centro de costo":"03.08.01.06.02","Dimensión":"02.01","Partida":"94.3.1.1.016",
              **{m:(100000 if m=="Jun" else 0) for m in MONTHS}},
             {"Centro de costo":"03.08.01.06.02","Dimensión":"02.01","Partida":"94.5.1.1.033",
              **{m:(75000 if m=="Set" else 0) for m in MONTHS}},
         ]))
-    if "destino_df" not in st.session_state:
-        st.session_state.destino_df = coerce(pd.DataFrame([
+    if "destino_seed" not in st.session_state:
+        st.session_state.destino_seed = coerce(pd.DataFrame([
             {"Centro de costo":"03.08.01.06.02","Dimensión":"02.01","Partida":"94.3.1.1.015",
              **{m:(40000 if m=="Set" else 60000 if m=="Oct" else 0) for m in MONTHS}},
             {"Centro de costo":"03.08.01.06.02","Dimensión":"02.01","Partida":"94.5.1.1.034",
              **{m:(75000 if m=="Nov" else 0) for m in MONTHS}},
         ]))
-    st.session_state.setdefault("single_df", empty_df(1))
+    st.session_state.setdefault("single_seed", empty_df(1))
+    for k in ["_origen_current", "_destino_current", "_single_current"]:
+        st.session_state.setdefault(k, empty_df(0))
     st.session_state.setdefault("justificacion", "")
     st.session_state.setdefault("solicitante", "")
     st.session_state.setdefault("unidad", "")
@@ -187,31 +182,30 @@ def init_state():
 def column_config():
     cfg = {
         "Centro de costo": st.column_config.TextColumn("Centro de costo", width="medium"),
-        "Dimensión": st.column_config.TextColumn("Dimensión", width="small"),
+        "Dimensión": st.column_config.TextColumn("Dim.", width="small"),
         "Partida": st.column_config.TextColumn("Partida", width="medium"),
-        "Total": st.column_config.NumberColumn("Total", format="S/ %d", disabled=True),
     }
     for m in MONTHS:
         cfg[m] = st.column_config.NumberColumn(m, format="%d", min_value=0.0, step=100.0, width="small")
     return cfg
 
-def edit_grid(state_key):
-    df = coerce(st.session_state[state_key]).copy()
-    df["Total"] = df[MONTHS].sum(axis=1)
+def edit_grid(seed_key, mirror_key):
+    """El editor es dueño de la edición (vía su key). Solo espejamos para totales/export."""
+    seed = coerce(st.session_state[seed_key])
     edited = st.data_editor(
-        df, key=f"editor_{state_key}", num_rows="dynamic",
+        seed, key=f"editor_{seed_key}", num_rows="dynamic",
         use_container_width=True, hide_index=True,
-        column_config=column_config(),
-        column_order=TEXT_COLS + MONTHS + ["Total"],
+        column_config=column_config(), column_order=LINE_COLS,
     )
-    st.session_state[state_key] = coerce(edited.drop(columns=["Total"], errors="ignore"))
-    return grid_total(st.session_state[state_key])
+    current = drop_empty(edited)
+    st.session_state[mirror_key] = current
+    return grid_total(current)
 
 # ------------------------------------------------------------------ app
 init_state()
 
 st.title("Nueva solicitud presupuestal")
-st.caption("Captura en grilla — mismo modelo mental que tu Excel, sin los bugs de posición")
+st.caption("Captura en grilla — mismo modelo mental que tu Excel")
 
 with st.sidebar:
     st.header("Importar / exportar")
@@ -221,17 +215,16 @@ with st.sidebar:
             data, sheet = read_excel(uploaded)
             st.session_state.tipo = data["tipo"]
             if data["tipo"] == "Traslado":
-                st.session_state.origen_df = coerce(data["origen"])
-                st.session_state.destino_df = coerce(data["destino"])
-                st.session_state.single_df = empty_df(1)
+                st.session_state.origen_seed = coerce(data["origen"])
+                st.session_state.destino_seed = coerce(data["destino"])
+                st.session_state.single_seed = empty_df(1)
             else:
-                st.session_state.single_df = coerce(data["origen"])
+                st.session_state.single_seed = coerce(data["origen"])
             st.session_state.solicitante = data["meta"].get("solicitante", "")
             st.session_state.unidad = data["meta"].get("unidad", "")
-            # data_editor keeps its own copy under editor_* keys — drop them so imports take effect.
-            for k in ["editor_origen_df", "editor_destino_df", "editor_single_df"]:
+            for k in ["editor_origen_seed", "editor_destino_seed", "editor_single_seed"]:
                 st.session_state.pop(k, None)
-            st.session_state.import_message = f"Importado desde «{sheet}» — tipo detectado: {data['tipo']}."
+            st.session_state.import_message = f"Importado desde «{sheet}» — tipo: {data['tipo']}."
             st.rerun()
         except Exception as e:
             st.error(f"No se pudo importar: {e}")
@@ -239,8 +232,7 @@ with st.sidebar:
         st.success(st.session_state.import_message)
     st.divider()
     st.download_button(
-        "Descargar DATOS_ENTRADA (.xlsx)",
-        data=export_datos_entrada(),
+        "Descargar DATOS_ENTRADA (.xlsx)", data=export_datos_entrada(),
         file_name="datos_entrada.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
@@ -263,23 +255,27 @@ with c:
 
 st.subheader("3. Movimiento presupuestal")
 if tipo == "Traslado":
-    st.markdown('<div class="helper">Edita como en Excel: teclea, tabula entre meses, pega rangos, '
-                'y usa el <b>+</b> de la grilla para añadir filas. El total del origen debe igualar al destino.</div>',
-                unsafe_allow_html=True)
+    st.markdown('<div class="helper">Edita como en Excel: teclea, tabula entre meses, pega rangos. '
+                'Usa el <b>+</b> al final de la grilla para añadir filas y el ícono de papelera para quitarlas. '
+                'El total del origen debe igualar al destino.</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-kicker">Origen</div>', unsafe_allow_html=True)
-    o = edit_grid("origen_df")
-    st.markdown(f'<div class="total-box">Total origen: <b>{money(o)}</b></div>', unsafe_allow_html=True)
-
+    o = edit_grid("origen_seed", "_origen_current")
     st.markdown('<div class="section-kicker">Destino</div>', unsafe_allow_html=True)
-    d = edit_grid("destino_df")
-    st.markdown(f'<div class="total-box">Total destino: <b>{money(d)}</b></div>', unsafe_allow_html=True)
+    d = edit_grid("destino_seed", "_destino_current")
+
+    diff = abs(o - d)
+    st.markdown("")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total origen", money(o))
+    m2.metric("Total destino", money(d))
+    m3.metric("Estado", "✓ Balanceado" if diff < .01 and o > 0 else f"⚠ {money(diff)}")
 else:
     label = "Destino (ampliación)" if tipo == "Ampliación" else "Presupuesto a reducir"
-    st.markdown('<div class="helper">Edita como en Excel: teclea, tabula entre meses, pega rangos, '
-                'y usa el <b>+</b> de la grilla para añadir filas.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="helper">Edita como en Excel: teclea, tabula entre meses, pega rangos. '
+                'Usa el <b>+</b> al final de la grilla para añadir filas.</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="section-kicker">{label}</div>', unsafe_allow_html=True)
-    s = edit_grid("single_df")
-    st.markdown(f'<div class="total-box">Total solicitado: <b>{money(s)}</b></div>', unsafe_allow_html=True)
+    s = edit_grid("single_seed", "_single_current")
+    st.metric("Total solicitado", money(s))
 
 st.subheader("4. Justificación")
 st.session_state.justificacion = st.text_area(
@@ -289,7 +285,8 @@ st.session_state.justificacion = st.text_area(
 
 st.subheader("5. Revisar y enviar")
 if tipo == "Traslado":
-    o, d = grid_total(st.session_state.origen_df), grid_total(st.session_state.destino_df)
+    o = grid_total(st.session_state.get("_origen_current", empty_df(0)))
+    d = grid_total(st.session_state.get("_destino_current", empty_df(0)))
     balanced = abs(o - d) < .01
     if balanced and o > 0:
         st.success(f"✓ Solicitud balanceada por {money(o)}")
@@ -299,7 +296,7 @@ if tipo == "Traslado":
         st.info("Agrega líneas de origen y destino para continuar.")
     can_submit = balanced and o > 0
 else:
-    s = grid_total(st.session_state.single_df)
+    s = grid_total(st.session_state.get("_single_current", empty_df(0)))
     if s > 0:
         st.success(f"✓ {tipo}: {money(s)}")
     else:
@@ -314,7 +311,8 @@ with c2:
 
 # ------------------------------------------------------------------ sticky bar
 if tipo == "Traslado":
-    o, d = grid_total(st.session_state.origen_df), grid_total(st.session_state.destino_df)
+    o = grid_total(st.session_state.get("_origen_current", empty_df(0)))
+    d = grid_total(st.session_state.get("_destino_current", empty_df(0)))
     balanced = abs(o - d) < .01
     status = ("<span class='status-ok'>✓ Balanceado</span>" if balanced and o > 0
               else f"<span class='status-warn'>⚠ Diferencia {money(abs(o - d))}</span>")
@@ -323,6 +321,6 @@ if tipo == "Traslado":
         <div class="item">Destino <b>{money(d)}</b></div>
         <div class="item">{status}</div></div></div>""", unsafe_allow_html=True)
 else:
-    s = grid_total(st.session_state.single_df)
+    s = grid_total(st.session_state.get("_single_current", empty_df(0)))
     st.markdown(f"""<div class="sticky-summary"><div class="wrap">
         <div class="item">{tipo} — total <b>{money(s)}</b></div></div></div>""", unsafe_allow_html=True)
