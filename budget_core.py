@@ -78,7 +78,6 @@ STATUS_REJECTED = "Rechazada"
 # Nota: last-write-wins; suficiente para un solo servidor / demo.
 DATA_DIR = Path(__file__).resolve().parent / "data"
 REQ_FILE = DATA_DIR / "requests.json"
-OUTBOX_FILE = DATA_DIR / "outbox.json"
 
 def _load(path: Path):
     if path.exists():
@@ -139,51 +138,3 @@ def new_request(user, tipo, periodo, unidad, solicitante, monto, movimiento):
         "decided_at": None,
         "decision_note": "",
     }
-
-def record_outbox(msg: dict):
-    data = _load(OUTBOX_FILE)
-    msg = {**msg, "at": _dt.datetime.now().isoformat(timespec="seconds")}
-    data.append(msg)
-    _save(OUTBOX_FILE, data)
-    return msg
-
-# ---------------------------------------------------------------- CORREOS
-def _money(v):
-    return f"S/ {float(v or 0):,.2f}"
-
-def approval_email(req, review_url):
-    subject = f"[Aprobación] {req['tipo']} {_money(req['monto'])} — {req['created_by_name']}"
-    html = f"""
-    <div style="font-family:Arial,sans-serif;color:#1d2939;max-width:560px">
-      <h2 style="color:#315b9d;margin-bottom:4px">Solicitud presupuestal pendiente</h2>
-      <p style="color:#667085;margin-top:0">Requiere tu aprobación.</p>
-      <table style="border-collapse:collapse;font-size:14px">
-        <tr><td style="padding:4px 10px;color:#667085">Tipo</td><td style="padding:4px 10px"><b>{req['tipo']}</b></td></tr>
-        <tr><td style="padding:4px 10px;color:#667085">Monto</td><td style="padding:4px 10px"><b>{_money(req['monto'])}</b></td></tr>
-        <tr><td style="padding:4px 10px;color:#667085">Solicitante</td><td style="padding:4px 10px">{req['created_by_name']} ({req['created_by']})</td></tr>
-        <tr><td style="padding:4px 10px;color:#667085">Unidad</td><td style="padding:4px 10px">{req['unidad'] or '—'}</td></tr>
-        <tr><td style="padding:4px 10px;color:#667085">Periodo</td><td style="padding:4px 10px">{req['periodo']}</td></tr>
-        <tr><td style="padding:4px 10px;color:#667085">Fecha</td><td style="padding:4px 10px">{req['created_at']}</td></tr>
-      </table>
-      <p style="margin-top:18px">
-        <a href="{review_url}" style="background:#315b9d;color:#fff;text-decoration:none;
-           padding:10px 18px;border-radius:8px;font-weight:600;font-size:14px">Revisar y decidir</a>
-      </p>
-      <p style="color:#98a2b3;font-size:12px">El enlace abre la solicitud en la app; la decisión exige inicio de sesión.</p>
-    </div>"""
-    return subject, html
-
-def decision_email(req):
-    ok = req["status"] == STATUS_APPROVED
-    color = "#137a4b" if ok else "#b42318"
-    subject = f"[{req['status']}] {req['tipo']} {_money(req['monto'])}"
-    note = f"<p><b>Nota:</b> {req['decision_note']}</p>" if req.get("decision_note") else ""
-    html = f"""
-    <div style="font-family:Arial,sans-serif;color:#1d2939;max-width:560px">
-      <h2 style="color:{color};margin-bottom:4px">Solicitud {req['status'].lower()}</h2>
-      <p>Tu {req['tipo'].lower()} por <b>{_money(req['monto'])}</b> fue
-         <b style="color:{color}">{req['status'].lower()}</b> por {req.get('approver','—')}
-         el {req.get('decided_at','—')}.</p>
-      {note}
-    </div>"""
-    return subject, html
