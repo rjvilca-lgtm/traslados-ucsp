@@ -60,18 +60,26 @@ def app_base_url():
 def send_email(to, subject, html):
     conf = safe_secret("smtp")
     if conf:
-        import smtplib
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
-        msg = MIMEMultipart("alternative")
-        msg["Subject"], msg["From"], msg["To"] = subject, conf["user"], to
-        msg.attach(MIMEText(html, "html"))
-        with smtplib.SMTP_SSL(conf["host"], int(conf.get("port", 465))) as s:
-            s.login(conf["user"], conf["password"])
-            s.sendmail(conf["user"], [to], msg.as_string())
-        return {"simulated": False}
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+            user = str(conf["user"]).strip()
+            # "".join(split()) elimina espacios (incl. no separables U+00A0) del app password
+            pwd = "".join(str(conf["password"]).split())
+            msg = MIMEMultipart("alternative")
+            msg["Subject"], msg["From"], msg["To"] = subject, user, to
+            msg.attach(MIMEText(html, "html", "utf-8"))
+            with smtplib.SMTP_SSL(conf["host"], int(conf.get("port", 465))) as s:
+                s.login(user, pwd)
+                s.sendmail(user, [to], msg.as_string())
+            return {"simulated": False, "error": None}
+        except Exception as e:
+            # Un fallo de correo NO debe tumbar la app: se degrada a simulado.
+            core.record_outbox({"to": to, "subject": subject, "html": html, "error": str(e)})
+            return {"simulated": True, "error": str(e)}
     core.record_outbox({"to": to, "subject": subject, "html": html})
-    return {"simulated": True}
+    return {"simulated": True, "error": None}
 
 # ------------------------------------------------------------- auth
 def auth_configured():
@@ -330,8 +338,10 @@ with t[0]:
             url = f"{app_base_url()}/?action=decide&id={req['id']}&token={req['token']}"
             s_, h_ = core.approval_email(req, url)
             res = send_email(APPROVER_EMAIL, s_, h_)
-            note = " (correo simulado — configura SMTP para envío real)" if res["simulated"] else ""
-            st.success(f"Solicitud enviada a aprobación de {APPROVER_EMAIL}.{note}")
+            st.success(f"Solicitud enviada a aprobación de {APPROVER_EMAIL}.")
+            if res.get("error"):
+                st.warning(f"No se pudo enviar el correo (la solicitud sí quedó registrada). "
+                           f"Detalle: {res['error']}")
             if res["simulated"]:
                 st.caption("Enlace de revisión (para pruebas):")
                 st.code(url)
