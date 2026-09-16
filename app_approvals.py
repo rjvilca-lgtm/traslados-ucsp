@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 import budget_core as core
+import budget_data as bdata
 from budget_core import MONTHS, TEXT_COLS, LINE_COLS, APPROVER_EMAIL, DOMAIN
 
 st.set_page_config(page_title="Solicitud presupuestal", page_icon="📊",
@@ -21,6 +22,21 @@ except Exception as e:
     st.error("No se pudo conectar al almacén (Google Sheets). Revisa los secretos "
              f"[gcp_service_account] y [sheets], y que la hoja esté compartida con el robot.\n\n{e}")
     st.stop()
+
+# --- Presupuesto vigente (Adj 2) de TI, solo lectura, cacheado por sesión (Fase 1)
+@st.cache_resource
+def _get_vigente_ws():
+    p = st.secrets["presupuesto"]
+    return bdata.build_vigente_ws(dict(st.secrets["gcp_service_account"]),
+                                  p["vigente_spreadsheet_id"], p["vigente_worksheet"])
+
+vigente_ok = True
+try:
+    bdata.set_vigente_ws(_get_vigente_ws())
+except Exception as e:
+    vigente_ok = False
+    st.warning("No se pudo leer el presupuesto vigente (Adj 2). La captura funciona, pero la "
+               f"validación de saldo no estará disponible hasta resolverlo.\n\n{e}")
 
 st.markdown("""
 <style>
@@ -253,6 +269,25 @@ with top2:
         except Exception: pass
         st.rerun()
 
+
+# ---- diagnóstico Fase 1: consulta de saldo del vigente (solo lectura) ----
+with st.sidebar:
+    st.subheader("Consulta de saldo (vigente)")
+    if not vigente_ok:
+        st.caption("Presupuesto vigente no disponible.")
+    else:
+        cc_q = st.text_input("Centro de costo", key="q_cc", placeholder="03.01.01.01.01")
+        cta_q = st.text_input("Cuenta contable", key="q_cta", placeholder="94.1.1.1.001")
+        mes_q = st.selectbox("Acumulado hasta", MONTHS, index=0, key="q_mes")
+        if cc_q and cta_q:
+            if bdata.line_exists(cc_q, cta_q):
+                idx = MONTHS.index(mes_q)
+                saldo = bdata.cumulative_available(cc_q, cta_q, idx)
+                st.metric(f"Saldo ERP acumulado a {mes_q}", f"S/ {saldo:,.2f}")
+                st.caption("Solo vigente (PPTO−COMP−EJEC). No incluye movimientos de la app "
+                           "aún no aplicados — eso llega en Fase 2.")
+            else:
+                st.warning("Esa combinación (CC, cuenta) no existe en el vigente.")
 
 # ---- pestañas ----
 tabs = ["Nueva solicitud", "Mis solicitudes"] + (["Aprobaciones"] if core.is_approver(user) else [])
