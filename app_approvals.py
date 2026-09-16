@@ -127,7 +127,7 @@ def column_config():
 def edit_grid(seed_key, mirror_key):
     seed = coerce(st.session_state[seed_key])
     edited = st.data_editor(seed, key=f"editor_{seed_key}", num_rows="dynamic",
-                            use_container_width=True, hide_index=True,
+                            width="stretch", hide_index=True,
                             column_config=column_config(), column_order=LINE_COLS)
     current = drop_empty(edited)
     st.session_state[mirror_key] = current
@@ -168,7 +168,7 @@ def render_request_detail(req):
         rows = mov.get(side)
         if rows:
             st.markdown(f'<div class="section-kicker">{side}</div>', unsafe_allow_html=True)
-            st.dataframe(coerce(pd.DataFrame(rows)), hide_index=True, use_container_width=True)
+            st.dataframe(coerce(pd.DataFrame(rows)), hide_index=True, width="stretch")
     if req.get("decision_note"):
         st.info(f"Nota de decisión: {req['decision_note']}")
 
@@ -181,10 +181,10 @@ def decision_panel(user, req):
     c1, c2 = st.columns(2)
     decided = None
     with c1:
-        if st.button("✓ Aprobar", type="primary", use_container_width=True, key=f"ap_{req['id']}"):
+        if st.button("✓ Aprobar", type="primary", width="stretch", key=f"ap_{req['id']}"):
             decided = core.STATUS_APPROVED
     with c2:
-        if st.button("✗ Rechazar", use_container_width=True, key=f"rj_{req['id']}"):
+        if st.button("✗ Rechazar", width="stretch", key=f"rj_{req['id']}"):
             decided = core.STATUS_REJECTED
     if decided:
         updated = core.update_request(req["id"], status=decided, approver=user["email"],
@@ -230,7 +230,7 @@ with top1:
 with top2:
     st.markdown(f"<div style='text-align:right;padding-top:14px'>{user['name']}<br>"
                 f"<span style='color:#667085;font-size:.8rem'>{user['email']}</span></div>", unsafe_allow_html=True)
-    if st.button("Cerrar sesión", use_container_width=True):
+    if st.button("Cerrar sesión", width="stretch"):
         st.session_state.pop("dev_user", None)
         try: st.logout()
         except Exception: pass
@@ -326,7 +326,7 @@ with t[0]:
     for p in problems:
         st.warning("⚠ " + p)
 
-    if st.button("Enviar solicitud", type="primary", use_container_width=True, disabled=bool(problems)):
+    if st.button("Enviar solicitud", type="primary", width="stretch", disabled=bool(problems)):
         if tipo == "Traslado":
             mov = {"origen": drop_empty(st.session_state._origen_current).to_dict("records"),
                    "destino": drop_empty(st.session_state._destino_current).to_dict("records")}
@@ -358,7 +358,7 @@ with t[1]:
         df = pd.DataFrame([{"Fecha": r["created_at"], "Tipo": r["tipo"], "Monto": r["monto"],
                             "Estado": r["status"], "Aprobador": r.get("approver") or "—",
                             "ID": r["id"]} for r in mine])
-        st.dataframe(df, hide_index=True, use_container_width=True,
+        st.dataframe(df, hide_index=True, width="stretch",
                      column_config={"Monto": st.column_config.NumberColumn("Monto", format="S/ %.2f")})
         with st.expander("Ver detalle de una solicitud"):
             rid = st.selectbox("Solicitud", [r["id"] for r in mine],
