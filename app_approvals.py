@@ -65,21 +65,61 @@ def current_identity():
     if nu: return nu
     return st.session_state.get("dev_user")
 
+def _find_logo():
+    from pathlib import Path
+    for p in ["assets/logo.png", "assets/logo.jpg", "assets/logo.jpeg", "logo.png", "logo.jpg"]:
+        fp = Path(__file__).resolve().parent / p
+        if fp.exists():
+            return str(fp)
+    return None
+
 def login_screen():
-    st.title("Solicitud presupuestal")
-    st.caption("Acceso institucional UCSP")
-    if auth_configured():
-        st.write("Inicia sesión con tu cuenta institucional.")
-        if st.button("Ingresar con Google", type="primary"):
-            st.login()
-    else:
-        st.markdown('<div class="helper">Modo desarrollo: el OAuth de Google no está configurado en '
-                    '<code>secrets.toml</code>. Elige un usuario de prueba para probar el flujo.</div>',
-                    unsafe_allow_html=True)
-        sel = st.selectbox("Usuario de prueba", list(core.MOCK_USERS.keys()))
-        if st.button("Entrar (dev)", type="primary"):
-            st.session_state.dev_user = {"email": sel, "name": core.MOCK_USERS[sel]["name"]}
-            st.rerun()
+    st.markdown("""
+    <style>
+    [data-testid="stAppViewContainer"], .stApp { background:#003a78; }
+    [data-testid="stHeader"] { background:transparent; }
+    .block-container { padding-top:12vh; }
+    /* tarjeta blanca */
+    .st-key-logincard {
+        background:#ffffff; border-radius:16px; padding:44px 52px;
+        box-shadow:0 20px 55px rgba(0,0,0,.28);
+    }
+    .login-title { text-align:center; font-family:Georgia,'Times New Roman',serif;
+        font-weight:400; font-size:2.3rem; color:#2b2b2b; margin:0 0 30px; letter-spacing:.3px; }
+    .login-logo-fallback { font-weight:800; color:#7a1f2b; font-size:1.15rem; line-height:1.15; }
+    .login-logo-fallback span { color:#1f2937; }
+    /* botón como enlace azul dentro de la tarjeta */
+    .st-key-logincard .stButton>button {
+        background:#ffffff; color:#0a3d7c; border:none; box-shadow:none;
+        font-weight:600; font-size:1.06rem; text-align:left; padding:0; min-height:0;
+    }
+    .st-key-logincard .stButton>button:hover { color:#062a5a; background:#ffffff; }
+    .st-key-logincard .stButton>button:focus { box-shadow:none; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    _, mid, _ = st.columns([1, 2, 1])
+    with mid:
+        with st.container(key="logincard", border=False):
+            st.markdown('<div class="login-title">Accede a tu cuenta</div>', unsafe_allow_html=True)
+            lc, rc = st.columns([5, 6], vertical_alignment="center")
+            with lc:
+                logo = _find_logo()
+                if logo:
+                    st.image(logo, width="stretch")
+                else:
+                    st.markdown('<div class="login-logo-fallback">Universidad Católica<br>'
+                                '<span>San Pablo</span></div>', unsafe_allow_html=True)
+            with rc:
+                if auth_configured():
+                    if st.button("Ingresa con tu\nSan Pablo Mail　›", width="stretch"):
+                        st.login()
+                else:
+                    sel = st.selectbox("Usuario de prueba", list(core.MOCK_USERS.keys()),
+                                       label_visibility="collapsed")
+                    if st.button("Ingresa (modo dev)　›", width="stretch"):
+                        st.session_state.dev_user = {"email": sel, "name": core.MOCK_USERS[sel]["name"]}
+                        st.rerun()
 
 # ------------------------------------------------------------- grid
 def column_config():
