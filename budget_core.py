@@ -1,12 +1,11 @@
 """
 Núcleo de lógica — SIN Streamlit, para poder testear y reemplazar por Azure SQL.
-Todo lo marcado como MOCK vive aquí para que la migración a SQL sea un solo archivo.
+Store en Google Sheets; la app inyecta el worksheet con set_worksheet().
 """
 import json
 import uuid
 import secrets as _secrets
 import datetime as _dt
-from pathlib import Path
 
 MONTHS = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Set","Oct","Nov","Dic"]
 TEXT_COLS = ["Centro de costo", "Dimensión", "Partida"]
@@ -73,50 +72,89 @@ STATUS_APPROVED = "Aprobada"
 STATUS_AUTO = "Aprobada (automática)"
 STATUS_REJECTED = "Rechazada"
 
-# ------------------------------------------------------- STORE (MOCK: JSON)
-# Reemplazar _load/_save por INSERT/UPDATE/SELECT en Azure SQL.
-# Nota: last-write-wins; suficiente para un solo servidor / demo.
-DATA_DIR = Path(__file__).resolve().parent / "data"
-REQ_FILE = DATA_DIR / "requests.json"
+# ------------------------------------------------- STORE (Google Sheets)
+# Una fila por solicitud. Columnas legibles + 'payload' con el JSON completo.
+# La interfaz (list/create/update/...) es la misma que tendrá la versión SQL.
+# Métodos de gspread usados: append_row, get_all_records, col_values, batch_update
+# (estables en gspread 5/6). El core NO importa streamlit: la app construye el
+# worksheet (cacheado) y se lo inyecta con set_worksheet().
+SHEET_HEADERS = ["id", "created_at", "created_by", "tipo", "status", "monto", "payload"]
+_WS = None  # worksheet inyectado por la app
 
-def _load(path: Path):
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            return []
-    return []
+def build_worksheet(sa_info: dict, spreadsheet_id: str, worksheet: str = "solicitudes"):
+    """Autentica con la cuenta de servicio y devuelve el worksheet (asegura cabecera)."""
+    import gspread
+    from google.oauth2.service_account import Credentials
+    scopes = ["https://www.googleapis.com/auth/spreadsheets",
+              "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_info(dict(sa_info), scopes=scopes)
+    sh = gspread.authorize(creds).open_by_key(spreadsheet_id)
+    try:
+        ws = sh.worksheet(worksheet)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=worksheet, rows=2000, cols=len(SHEET_HEADERS))
+    if ws.row_values(1) != SHEET_HEADERS:
+        ws.append_row(SHEET_HEADERS)
+    return ws
 
-def _save(path: Path, data):
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+def set_worksheet(ws):
+    global _WS
+    _WS = ws
+
+def _require_ws():
+    if _WS is None:
+        raise RuntimeError("Store no inicializado: la app debe llamar set_worksheet() primero.")
+    return _WS
+
+def _req_to_row(req: dict):
+    return [str(req.get("id", "")), req.get("created_at", ""), req.get("created_by", ""),
+            req.get("tipo", ""), req.get("status", ""), req.get("monto", 0),
+            json.dumps(req, ensure_ascii=False)]
+
+def _row_number(rid: str):
+    """Número de fila (1-based) de la solicitud, o None. Columna A = id."""
+    ids = _require_ws().col_values(1)  # incluye cabecera en el índice 0
+    for i, v in enumerate(ids):
+        if str(v) == str(rid):
+            return i + 1
+    return None
 
 def list_requests():
-    return _load(REQ_FILE)
+    out = []
+    for row in _require_ws().get_all_records():
+        payload = row.get("payload")
+        if payload:
+            try:
+                out.append(json.loads(payload)); continue
+            except Exception:
+                pass
+        out.append({k: row.get(k) for k in SHEET_HEADERS if k != "payload"})
+    return out
 
 def requests_for(email: str):
     email = (email or "").lower()
-    return [r for r in list_requests() if r.get("created_by", "").lower() == email]
+    return [r for r in list_requests() if str(r.get("created_by", "")).lower() == email]
 
 def pending_requests():
     return [r for r in list_requests() if r.get("status") == STATUS_PENDING]
 
 def get_request(rid: str):
-    return next((r for r in list_requests() if r.get("id") == rid), None)
+    return next((r for r in list_requests() if str(r.get("id")) == str(rid)), None)
 
 def create_request(req: dict):
-    data = _load(REQ_FILE)
-    data.append(req)
-    _save(REQ_FILE, data)
+    _require_ws().append_row(_req_to_row(req), value_input_option="RAW")
     return req
 
 def update_request(rid: str, **changes):
-    data = _load(REQ_FILE)
-    for r in data:
-        if r.get("id") == rid:
-            r.update(changes)
-    _save(REQ_FILE, data)
-    return get_request(rid)
+    r = get_request(rid)
+    if r is None:
+        return None
+    r.update(changes)
+    row_i = _row_number(rid)
+    if row_i is None:
+        return None
+    _require_ws().batch_update([{"range": f"A{row_i}:G{row_i}", "values": [_req_to_row(r)]}])
+    return r
 
 def new_request(user, tipo, periodo, unidad, solicitante, monto, movimiento):
     na = needs_approval(tipo, monto)
