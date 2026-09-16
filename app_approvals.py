@@ -9,6 +9,19 @@ from budget_core import MONTHS, TEXT_COLS, LINE_COLS, APPROVER_EMAIL, DOMAIN
 st.set_page_config(page_title="Solicitud presupuestal", page_icon="📊",
                    layout="wide", initial_sidebar_state="collapsed")
 
+# --- Store persistente en Google Sheets (auth cacheada; el core recibe el worksheet)
+@st.cache_resource
+def _get_worksheet():
+    return core.build_worksheet(dict(st.secrets["gcp_service_account"]),
+                                st.secrets["sheets"]["spreadsheet_id"])
+
+try:
+    core.set_worksheet(_get_worksheet())
+except Exception as e:
+    st.error("No se pudo conectar al almacén (Google Sheets). Revisa los secretos "
+             f"[gcp_service_account] y [sheets], y que la hoja esté compartida con el robot.\n\n{e}")
+    st.stop()
+
 st.markdown("""
 <style>
 .block-container {max-width: 1500px; padding-top: 1.2rem; padding-bottom: 3rem;}
