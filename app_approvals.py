@@ -46,40 +46,6 @@ def grid_total(df): return float(coerce(df)[MONTHS].sum().sum())
 def money(v): return f"S/ {float(v or 0):,.2f}"
 def ccs_of(df): return list(drop_empty(df)["Centro de costo"].astype(str))
 
-# ------------------------------------------------------------- secrets / email
-def safe_secret(key):
-    try:
-        if key in st.secrets: return dict(st.secrets[key])
-    except Exception: return None
-    return None
-
-def app_base_url():
-    conf = safe_secret("app") or {}
-    return conf.get("base_url", "http://localhost:8501")
-
-def send_email(to, subject, html):
-    conf = safe_secret("smtp")
-    if conf:
-        try:
-            import smtplib
-            from email.mime.text import MIMEText
-            from email.mime.multipart import MIMEMultipart
-            user = str(conf["user"]).strip()
-            # "".join(split()) elimina espacios (incl. no separables U+00A0) del app password
-            pwd = "".join(str(conf["password"]).split())
-            msg = MIMEMultipart("alternative")
-            msg["Subject"], msg["From"], msg["To"] = subject, user, to
-            msg.attach(MIMEText(html, "html", "utf-8"))
-            with smtplib.SMTP_SSL(conf["host"], int(conf.get("port", 465))) as s:
-                s.login(user, pwd)
-                s.sendmail(user, [to], msg.as_string())
-            return {"simulated": False, "error": None}
-        except Exception as e:
-            # Un fallo de correo NO debe tumbar la app: se degrada a simulado.
-            core.record_outbox({"to": to, "subject": subject, "html": html, "error": str(e)})
-            return {"simulated": True, "error": str(e)}
-    core.record_outbox({"to": to, "subject": subject, "html": html})
-    return {"simulated": True, "error": None}
 
 # ------------------------------------------------------------- auth
 def auth_configured():
@@ -187,13 +153,11 @@ def decision_panel(user, req):
         if st.button("✗ Rechazar", width="stretch", key=f"rj_{req['id']}"):
             decided = core.STATUS_REJECTED
     if decided:
-        updated = core.update_request(req["id"], status=decided, approver=user["email"],
-                                      decided_at=dt.datetime.now().isoformat(timespec="seconds"),
-                                      decision_note=note or "")
-        s, h = core.decision_email(updated)
-        res = send_email(updated["created_by"], s, h)
+        core.update_request(req["id"], status=decided, approver=user["email"],
+                            decided_at=dt.datetime.now().isoformat(timespec="seconds"),
+                            decision_note=note or "")
         msg = "aprobada" if decided == core.STATUS_APPROVED else "rechazada"
-        st.success(f"Solicitud {msg}." + (" (correo simulado)" if res["simulated"] else " Correo enviado al solicitante."))
+        st.success(f"Solicitud {msg}. El solicitante verá el nuevo estado en «Mis solicitudes».")
         st.rerun()
 
 # ------------------------------------------------------------- app
@@ -236,21 +200,6 @@ with top2:
         except Exception: pass
         st.rerun()
 
-# ---- ruta de decisión desde enlace de correo ----
-qp = st.query_params
-if qp.get("action") == "decide":
-    rid, token = qp.get("id"), qp.get("token")
-    req = core.get_request(rid)
-    st.subheader("Revisar solicitud")
-    if not core.is_approver(user):
-        st.error("Solo un aprobador puede decidir solicitudes.")
-    elif req is None or req.get("token") != token:
-        st.error("Solicitud no encontrada o enlace inválido.")
-    else:
-        decision_panel(user, req)
-    if st.button("← Volver"):
-        st.query_params.clear(); st.rerun()
-    st.stop()
 
 # ---- pestañas ----
 tabs = ["Nueva solicitud", "Mis solicitudes"] + (["Aprobaciones"] if core.is_approver(user) else [])
@@ -335,16 +284,8 @@ with t[0]:
         req = core.new_request(user, tipo, periodo, unidad, solicitante, monto, mov)
         core.create_request(req)
         if req["needs_approval"]:
-            url = f"{app_base_url()}/?action=decide&id={req['id']}&token={req['token']}"
-            s_, h_ = core.approval_email(req, url)
-            res = send_email(APPROVER_EMAIL, s_, h_)
-            st.success(f"Solicitud enviada a aprobación de {APPROVER_EMAIL}.")
-            if res.get("error"):
-                st.warning(f"No se pudo enviar el correo (la solicitud sí quedó registrada). "
-                           f"Detalle: {res['error']}")
-            if res["simulated"]:
-                st.caption("Enlace de revisión (para pruebas):")
-                st.code(url)
+            st.success(f"Solicitud enviada a aprobación. {APPROVER_EMAIL} la revisará en la "
+                       f"pestaña «Aprobaciones». Podrás seguir su estado en «Mis solicitudes».")
         else:
             st.success("Solicitud registrada y aprobada automáticamente.")
         st.caption(f"ID de solicitud: {req['id']}")
