@@ -278,16 +278,17 @@ with st.sidebar:
     else:
         cc_q = st.text_input("Centro de costo", key="q_cc", placeholder="03.01.01.01.01")
         cta_q = st.text_input("Cuenta contable", key="q_cta", placeholder="94.1.1.1.001")
+        dim_q = st.text_input("Dimensión", key="q_dim", placeholder="01.03")
         mes_q = st.selectbox("Acumulado hasta", MONTHS, index=0, key="q_mes")
-        if cc_q and cta_q:
-            if bdata.line_exists(cc_q, cta_q):
+        if cc_q and cta_q and dim_q:
+            if bdata.line_exists(cc_q, cta_q, dim_q):
                 idx = MONTHS.index(mes_q)
-                saldo = bdata.cumulative_available(cc_q, cta_q, idx)
+                saldo = bdata.cumulative_available(cc_q, cta_q, dim_q, idx)
                 st.metric(f"Saldo ERP acumulado a {mes_q}", f"S/ {saldo:,.2f}")
                 st.caption("Solo vigente (PPTO−COMP−EJEC). No incluye movimientos de la app "
                            "aún no aplicados — eso llega en Fase 2.")
             else:
-                st.warning("Esa combinación (CC, cuenta) no existe en el vigente.")
+                st.warning("Esa combinación (CC, cuenta, dimensión) no existe en el vigente.")
 
 # ---- pestañas ----
 tabs = ["Nueva solicitud", "Mis solicitudes"] + (["Aprobaciones"] if core.is_approver(user) else [])
