@@ -18,6 +18,7 @@ def _get_worksheet():
 
 try:
     core.set_worksheet(_get_worksheet())
+    core.invalidate_cache()  # lee la hoja UNA vez por rerun (evita 429 de cuota)
 except Exception as e:
     st.error("No se pudo conectar al almacén (Google Sheets). Revisa los secretos "
              f"[gcp_service_account] y [sheets], y que la hoja esté compartida con el robot.\n\n{e}")
@@ -440,13 +441,16 @@ if core.is_approver(user):
                 snapshot = bdata.load_vigente(force=True)
                 resultados, final = bcut.run_cutoff(para_corte, snapshot)
                 ejec_ids = set()
+                cambios = []
+                _now = dt.datetime.now().isoformat(timespec="seconds")
                 for r in resultados:
                     ok = r["result"] == "Ejecutada"
                     nuevo = core.STATUS_EJECUTADA if ok else core.STATUS_RECH_SALDO
-                    core.update_request(r["id"], status=nuevo, cutoff_motivo=r["motivo"],
-                                        cutoff_at=dt.datetime.now().isoformat(timespec="seconds"))
+                    cambios.append((r["id"], {"status": nuevo, "cutoff_motivo": r["motivo"],
+                                              "cutoff_at": _now}))
                     if ok:
                         ejec_ids.add(r["id"])
+                core.bulk_update(cambios)  # una sola escritura para todo el corte
                 # Generar archivo de carga con las ejecutadas
                 csv_bytes, filas, warns = (b"", [], [])
                 if catalogo_ok and ejec_ids:
