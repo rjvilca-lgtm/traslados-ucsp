@@ -38,6 +38,21 @@ except Exception as e:
     st.warning("No se pudo leer el presupuesto vigente (Adj 2). La captura funciona, pero la "
                f"validación de saldo no estará disponible hasta resolverlo.\n\n{e}")
 
+# --- Catálogo CC->LINEA (pestaña del store), cacheado
+@st.cache_resource
+def _get_catalogo_ws():
+    ws = _get_worksheet().spreadsheet.worksheet(
+        st.secrets.get("catalogo", {}).get("worksheet", "catalogo_cc_linea"))
+    return ws
+
+catalogo_ok = True
+try:
+    bdata.set_catalogo_ws(_get_catalogo_ws())
+except Exception as e:
+    catalogo_ok = False
+    st.warning("No se pudo leer el catálogo CC→LINEA (pestaña 'catalogo_cc_linea' del store). "
+               f"El corte funciona, pero no se podrá generar el archivo de carga.\n\n{e}")
+
 st.markdown("""
 <style>
 .block-container {max-width: 1500px; padding-top: 1.2rem; padding-bottom: 3rem;}
@@ -421,17 +436,44 @@ if core.is_approver(user):
         elif para_corte:
             if st.button("Ejecutar corte del día", type="primary"):
                 import budget_cutoff as bcut
+                import budget_export as bexp
                 snapshot = bdata.load_vigente(force=True)
-                resultados, _ = bcut.run_cutoff(para_corte, snapshot)
-                ejec = rech = 0
+                resultados, final = bcut.run_cutoff(para_corte, snapshot)
+                ejec_ids = set()
                 for r in resultados:
-                    nuevo = core.STATUS_EJECUTADA if r["result"] == "Ejecutada" else core.STATUS_RECH_SALDO
+                    ok = r["result"] == "Ejecutada"
+                    nuevo = core.STATUS_EJECUTADA if ok else core.STATUS_RECH_SALDO
                     core.update_request(r["id"], status=nuevo, cutoff_motivo=r["motivo"],
                                         cutoff_at=dt.datetime.now().isoformat(timespec="seconds"))
-                    ejec += r["result"] == "Ejecutada"
-                    rech += r["result"] != "Ejecutada"
-                st.success(f"Corte ejecutado: {ejec} ejecutada(s), {rech} rechazada(s) por saldo.")
-                st.caption("Falta generar el archivo de carga (Fase 2b) y confirmar la carga (Fase 4).")
-                for r in resultados:
-                    if r["result"] != "Ejecutada":
-                        st.warning(f"✗ {r['id']} · {money(r['monto'] or 0)} — {r['motivo']}")
+                    if ok:
+                        ejec_ids.add(r["id"])
+                # Generar archivo de carga con las ejecutadas
+                csv_bytes, filas, warns = (b"", [], [])
+                if catalogo_ok and ejec_ids:
+                    ejecutadas = [r for r in para_corte if r["id"] in ejec_ids]
+                    csv_bytes, filas, warns = bexp.generate(ejecutadas, final, bdata.load_catalogo())
+                st.session_state.cutoff_result = {
+                    "resultados": resultados, "csv": csv_bytes, "filas": filas,
+                    "warns": warns, "fecha": dt.date.today().isoformat(),
+                    "n_ejec": len(ejec_ids), "n_rech": len(resultados) - len(ejec_ids),
+                }
+                st.rerun()
+
+        cr = st.session_state.get("cutoff_result")
+        if cr:
+            st.success(f"Corte del {cr['fecha']}: {cr['n_ejec']} ejecutada(s), "
+                       f"{cr['n_rech']} rechazada(s) por saldo.")
+            for r in cr["resultados"]:
+                if r["result"] != "Ejecutada":
+                    st.warning(f"✗ {money(r['monto'] or 0)} — {r['motivo']}")
+            if cr["warns"]:
+                st.error("Líneas omitidas del archivo:\n\n" + "\n".join(f"- {w}" for w in cr["warns"]))
+            if cr["csv"]:
+                st.download_button(
+                    f"Descargar archivo de carga ({len(cr['filas'])} líneas)",
+                    data=cr["csv"], file_name=f"cargappto_{cr['fecha']}.csv",
+                    mime="text/csv", type="primary")
+                st.caption("Sube este archivo al ERP. Después, la confirmación de carga "
+                           "(Fase 4) marcará las solicitudes como aplicadas.")
+            elif cr["n_ejec"]:
+                st.info("No se generó archivo (catálogo CC→LINEA no disponible).")
