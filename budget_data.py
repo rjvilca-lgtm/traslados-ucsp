@@ -5,6 +5,7 @@ lee directo de la columna DIMENSION del vigente (ya viene punteada). Idioma inte
 punteado; la traducción a numérica (dim_equiv) se usa solo al exportar el Adj 1.
 Sin Streamlit: la app inyecta el worksheet con set_vigente_ws(); testeable offline.
 """
+import dim_equiv as de
 
 # 12 meses en orden. Los índices _1.._12 de la hoja mapean a estos.
 MONTH_KEYS = list(range(1, 13))
@@ -86,7 +87,7 @@ def load_vigente(force=False):
     for row in records:
         cc = str(row.get("CENTRO_COSTO", "")).strip()
         cuenta = str(row.get("CUENTA_CONTABLE", "")).strip()
-        dim = str(row.get("DIMENSION", "")).strip()  # punteada, idioma interno
+        dim = de.normaliza_punteada(row.get("DIMENSION", ""))  # punteada, normalizada
         if not cc or not cuenta:
             continue
         key = _mkkey(cc, cuenta, dim)
