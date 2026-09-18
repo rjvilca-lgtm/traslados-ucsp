@@ -29,7 +29,8 @@ def _iter_lines(mov):
 
 def _key(line):
     return (str(line.get("Centro de costo", "")).strip(),
-            str(line.get("Partida", "")).strip())
+            str(line.get("Partida", "")).strip(),
+            str(line.get("Dimensión", "")).strip())
 
 
 def _months_of(line):
@@ -82,7 +83,7 @@ def evaluate_request(req, snap):
             deltas.append((key, idx, signo * abs(monto), rol))
 
     if faltantes:
-        return False, "Línea(s) inexistente(s) en el vigente: " + ", ".join(f"{c}/{q}" for c, q in sorted(faltantes))
+        return False, "Línea(s) inexistente(s) en el vigente: " + ", ".join("/".join(k) for k in sorted(faltantes))
 
     # Trabajar sobre copia; solo si pasa, se vuelca a snap.
     work = copy.deepcopy(snap)
@@ -95,9 +96,9 @@ def evaluate_request(req, snap):
             if rol == "origen":
                 avail = _cumulative_available(work, key, idx)
                 if avail is None or avail < 0:  # regla: acumulado >= 0 en el mes M
-                    c, q = key
+                    etq = "/".join(key)
                     return (False,
-                            f"Saldo insuficiente en {c}/{q}, mes {FORM_MONTHS[idx]}: "
+                            f"Saldo insuficiente en {etq}, mes {FORM_MONTHS[idx]}: "
                             f"acumulado quedaría en S/ {avail:,.2f}")
 
     # pasa -> commit
