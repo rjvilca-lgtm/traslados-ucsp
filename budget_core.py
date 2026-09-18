@@ -71,6 +71,8 @@ STATUS_PENDING = "Pendiente de aprobación"
 STATUS_APPROVED = "Aprobada"
 STATUS_AUTO = "Aprobada (automática)"
 STATUS_REJECTED = "Rechazada"
+STATUS_EJECUTADA = "Ejecutada"
+STATUS_RECH_SALDO = "Rechazada por saldo"
 
 # ------------------------------------------------- STORE (Google Sheets)
 # Una fila por solicitud. Columnas legibles + 'payload' con el JSON completo.
