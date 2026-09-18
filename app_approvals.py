@@ -54,6 +54,20 @@ except Exception as e:
     st.warning("No se pudo leer el catálogo CC→LINEA (pestaña 'catalogo_cc_linea' del store). "
                f"El corte funciona, pero no se podrá generar el archivo de carga.\n\n{e}")
 
+# --- Presupuesto original Adj 1 (pestaña del store), base del archivo de carga
+@st.cache_resource
+def _get_adj1_ws():
+    return _get_worksheet().spreadsheet.worksheet(
+        st.secrets.get("adj1", {}).get("worksheet", "Ppto_2026_original"))
+
+adj1_ok = True
+try:
+    bdata.set_adj1_ws(_get_adj1_ws())
+except Exception as e:
+    adj1_ok = False
+    st.warning("No se pudo leer el presupuesto original (pestaña 'Ppto_2026_original'). "
+               f"El corte funciona, pero no se podrá generar el archivo de carga.\n\n{e}")
+
 st.markdown("""
 <style>
 .block-container {max-width: 1500px; padding-top: 1.2rem; padding-bottom: 3rem;}
@@ -451,11 +465,12 @@ if core.is_approver(user):
                     if ok:
                         ejec_ids.add(r["id"])
                 core.bulk_update(cambios)  # una sola escritura para todo el corte
-                # Generar archivo de carga con las ejecutadas
+                # Generar archivo de carga con las ejecutadas (base = Adj 1)
                 csv_bytes, filas, warns = (b"", [], [])
-                if catalogo_ok and ejec_ids:
+                if adj1_ok and ejec_ids:
                     ejecutadas = [r for r in para_corte if r["id"] in ejec_ids]
-                    csv_bytes, filas, warns = bexp.generate(ejecutadas, final, bdata.load_catalogo())
+                    cat = bdata.load_catalogo() if catalogo_ok else {}
+                    csv_bytes, filas, warns = bexp.generate(ejecutadas, bdata.load_adj1(), cat)
                 st.session_state.cutoff_result = {
                     "resultados": resultados, "csv": csv_bytes, "filas": filas,
                     "warns": warns, "fecha": dt.date.today().isoformat(),
