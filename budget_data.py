@@ -56,6 +56,54 @@ def linea_de(cc):
     return load_catalogo().get(str(cc).strip())
 
 
+# --- Presupuesto ORIGINAL (Adj 1) — base del absoluto para el archivo de carga ---
+# Meses como fechas (31/01/2026...), dimensión NUMÉRICA (22) -> se traduce a punteada.
+_ADJ1_WS = None
+_ADJ1_CACHE = None
+ADJ1_MONTH_HEADERS = ["31/01/2026", "28/02/2026", "31/03/2026", "30/04/2026", "31/05/2026",
+                      "30/06/2026", "31/07/2026", "31/08/2026", "30/09/2026", "31/10/2026",
+                      "30/11/2026", "31/12/2026"]
+
+def set_adj1_ws(ws):
+    global _ADJ1_WS, _ADJ1_CACHE
+    _ADJ1_WS = ws
+    _ADJ1_CACHE = None
+
+def load_adj1(force=False):
+    """
+    Dict {(cc,cuenta,dim_punteada): {'ppto':[12], 'linea', 'tipo', 'dim_num'}} desde Adj 1.
+    La dimensión se traduce numérica->punteada para que la llave calce con el vigente.
+    """
+    global _ADJ1_CACHE
+    if _ADJ1_CACHE is not None and not force:
+        return _ADJ1_CACHE
+    if _ADJ1_WS is None:
+        raise RuntimeError("Adj 1 no inicializado: la app debe llamar set_adj1_ws().")
+    data = {}
+    for row in _ADJ1_WS.get_all_records():
+        cc = str(row.get("CENTRO_COSTO", "")).strip()
+        cuenta = str(row.get("CUENTA_CONTABLE", "")).strip()
+        dim_num = str(row.get("DIMENSION", "")).strip()
+        if dim_num.endswith(".0"):
+            dim_num = dim_num[:-2]
+        dim_punt = de.numerica_a_punteada(dim_num)  # 22 -> 01.03
+        if not cc or not cuenta or dim_punt is None:
+            continue
+        key = _mkkey(cc, cuenta, dim_punt)
+        ppto = [_num(row.get(h)) for h in ADJ1_MONTH_HEADERS]
+        linea = str(row.get("LINEA", "")).strip()
+        if linea.endswith(".0"):
+            linea = linea[:-2]
+        data[key] = {"ppto": ppto, "linea": linea,
+                     "tipo": str(row.get("TIPO", "N")).strip() or "N", "dim_num": dim_num}
+    _ADJ1_CACHE = data
+    return data
+
+def adj1_line(cc, cuenta, dim):
+    """Registro de Adj 1 para la terna (dim punteada), o None."""
+    return load_adj1().get(_mkkey(cc, cuenta, dim))
+
+
 def build_vigente_ws(sa_info: dict, spreadsheet_id: str, worksheet: str):
     """Abre la hoja vigente de TI (solo lectura) con la cuenta de servicio."""
     import gspread
