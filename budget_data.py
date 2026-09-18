@@ -1,14 +1,24 @@
 """
-Fase 1 — Lector del PRESUPUESTO VIGENTE (Adj 2), solo lectura.
-Fuente: hoja de Google Sheets de TI. Expone, por línea (CENTRO_COSTO, CUENTA_CONTABLE),
-los arreglos mensuales PPTO / COMP / EJEC. NO calcula saldo (eso es Fase 2).
-Sin Streamlit: la app inyecta el worksheet con set_vigente_ws(); así es testeable offline.
+Fase 1/2a-fix — Lector del PRESUPUESTO VIGENTE (Adj 2), solo lectura.
+Llave de línea: (CENTRO_COSTO, CUENTA_CONTABLE, DIMENSION_punteada). La dimensión se
+lee directo de la columna DIMENSION del vigente (ya viene punteada). Idioma interno =
+punteado; la traducción a numérica (dim_equiv) se usa solo al exportar el Adj 1.
+Sin Streamlit: la app inyecta el worksheet con set_vigente_ws(); testeable offline.
 """
 
 # 12 meses en orden. Los índices _1.._12 de la hoja mapean a estos.
 MONTH_KEYS = list(range(1, 13))
-KEY_COLS = ["CENTRO_COSTO", "CUENTA_CONTABLE"]
+# Campos que forman la llave de línea. Configurable: si algún día (CC,cuenta) bastara,
+# quitar "DIMENSION" de esta tupla y el resto del pipeline sigue funcionando.
+KEY_COLS = ["CENTRO_COSTO", "CUENTA_CONTABLE", "DIMENSION"]
 ATTR_COLS = ["DEPARTAMENTO", "DESCRIPCION_CC", "DESCRIPCION_CT", "PROYECTO", "DIMENSION", "TIPO"]
+
+def _mkkey(cc, cuenta, dim):
+    """Construye la llave respetando KEY_COLS (con o sin dimensión)."""
+    parts = {"CENTRO_COSTO": str(cc).strip(),
+             "CUENTA_CONTABLE": str(cuenta).strip(),
+             "DIMENSION": str(dim).strip()}
+    return tuple(parts[c] for c in KEY_COLS)
 
 _VIG_WS = None       # worksheet inyectado por la app
 _CACHE = None        # dict cacheado: (cc, cuenta) -> registro
@@ -76,15 +86,16 @@ def load_vigente(force=False):
     for row in records:
         cc = str(row.get("CENTRO_COSTO", "")).strip()
         cuenta = str(row.get("CUENTA_CONTABLE", "")).strip()
+        dim = str(row.get("DIMENSION", "")).strip()  # punteada, idioma interno
         if not cc or not cuenta:
             continue
-        key = (cc, cuenta)
+        key = _mkkey(cc, cuenta, dim)
         rec = data.setdefault(key, {
-            "centro_costo": cc, "cuenta": cuenta,
+            "centro_costo": cc, "cuenta": cuenta, "dimension": dim,
             "ppto": [0.0] * 12, "comp": [0.0] * 12, "ejec": [0.0] * 12,
             "attrs": {a: row.get(a, "") for a in ATTR_COLS if a in row},
         })
-        # si (cc,cuenta) se repite, se suman los meses (defensivo; no debería pasar)
+        # si la llave se repite (no debería), se suman los meses (defensivo)
         for i, m in enumerate(MONTH_KEYS):
             rec["ppto"][i] += _num(row.get(f"PPTO_{m}"))
             rec["comp"][i] += _num(row.get(f"COMP_{m}"))
@@ -93,26 +104,26 @@ def load_vigente(force=False):
     return data
 
 
-# ---- Consultas que usará la app (Fase 2 construye la validación de saldo sobre estas) ----
+# ---- Consultas por línea (CC, cuenta, dimensión punteada) ----
 
-def get_line(cc, cuenta):
+def get_line(cc, cuenta, dim):
     """Registro de una línea, o None si no existe en el vigente."""
-    return load_vigente().get((str(cc).strip(), str(cuenta).strip()))
+    return load_vigente().get(_mkkey(cc, cuenta, dim))
 
-def line_exists(cc, cuenta):
-    return get_line(cc, cuenta) is not None
+def line_exists(cc, cuenta, dim):
+    return get_line(cc, cuenta, dim) is not None
 
-def monthly(cc, cuenta, campo):
-    """Arreglo de 12 valores de 'ppto' | 'comp' | 'ejec' para la línea (ceros si no existe)."""
-    rec = get_line(cc, cuenta)
+def monthly(cc, cuenta, dim, campo):
+    """Arreglo de 12 valores de 'ppto' | 'comp' | 'ejec' (ceros si no existe)."""
+    rec = get_line(cc, cuenta, dim)
     return list(rec[campo]) if rec else [0.0] * 12
 
-def cumulative_available(cc, cuenta, month_index):
+def cumulative_available(cc, cuenta, dim, month_index):
     """
-    Saldo ACUMULADO al mes (0-based) = Σ_{m<=month} (PPTO - COMP - EJEC), SOLO con datos del vigente.
-    OJO: esto es el saldo del ERP; la Fase 2 le sumará los movimientos de la app aún no aplicados.
+    Saldo ACUMULADO al mes (0-based) = Σ_{m<=month} (PPTO - COMP - EJEC), SOLO del vigente (ERP).
+    El corte (budget_cutoff) le aplica encima los movimientos del día.
     """
-    rec = get_line(cc, cuenta)
+    rec = get_line(cc, cuenta, dim)
     if rec is None:
         return 0.0
     total = 0.0
