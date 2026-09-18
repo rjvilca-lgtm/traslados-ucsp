@@ -407,3 +407,30 @@ if core.is_approver(user):
                             f"· {req['created_at']}")
                 with st.expander("Revisar y decidir"):
                     decision_panel(user, req)
+
+        st.divider()
+        st.subheader("Corte del día")
+        st.caption("Evalúa en orden de llegada las solicitudes aprobadas contra el saldo del "
+                   "vigente, descontando secuencialmente. Rechazo total si no alcanza.")
+        para_corte = [r for r in core.list_requests()
+                      if r.get("status") in (core.STATUS_APPROVED, core.STATUS_AUTO)]
+        st.write(f"**{len(para_corte)}** solicitud(es) aprobada(s) esperando corte.")
+        if not vigente_ok:
+            st.warning("El presupuesto vigente no está disponible; no se puede ejecutar el corte.")
+        elif para_corte:
+            if st.button("Ejecutar corte del día", type="primary"):
+                import budget_cutoff as bcut
+                snapshot = bdata.load_vigente(force=True)
+                resultados, _ = bcut.run_cutoff(para_corte, snapshot)
+                ejec = rech = 0
+                for r in resultados:
+                    nuevo = core.STATUS_EJECUTADA if r["result"] == "Ejecutada" else core.STATUS_RECH_SALDO
+                    core.update_request(r["id"], status=nuevo, cutoff_motivo=r["motivo"],
+                                        cutoff_at=dt.datetime.now().isoformat(timespec="seconds"))
+                    ejec += r["result"] == "Ejecutada"
+                    rech += r["result"] != "Ejecutada"
+                st.success(f"Corte ejecutado: {ejec} ejecutada(s), {rech} rechazada(s) por saldo.")
+                st.caption("Falta generar el archivo de carga (Fase 2b) y confirmar la carga (Fase 4).")
+                for r in resultados:
+                    if r["result"] != "Ejecutada":
+                        st.warning(f"✗ {r['id']} · {money(r['monto'] or 0)} — {r['motivo']}")
