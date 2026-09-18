@@ -24,6 +24,37 @@ def _mkkey(cc, cuenta, dim):
 _VIG_WS = None       # worksheet inyectado por la app
 _CACHE = None        # dict cacheado: (cc, cuenta) -> registro
 
+# --- Catálogo CENTRO_COSTO -> LINEA (pestaña del store) ---
+_CAT_WS = None
+_CAT_CACHE = None
+
+def set_catalogo_ws(ws):
+    global _CAT_WS, _CAT_CACHE
+    _CAT_WS = ws
+    _CAT_CACHE = None
+
+def load_catalogo(force=False):
+    """Dict {CENTRO_COSTO: LINEA} desde la pestaña del store. Cacheado."""
+    global _CAT_CACHE
+    if _CAT_CACHE is not None and not force:
+        return _CAT_CACHE
+    if _CAT_WS is None:
+        raise RuntimeError("Catálogo no inicializado: la app debe llamar set_catalogo_ws().")
+    out = {}
+    for row in _CAT_WS.get_all_records():
+        cc = str(row.get("CENTRO_COSTO", "")).strip()
+        lin = str(row.get("LINEA", "")).strip()
+        if lin.endswith(".0"):
+            lin = lin[:-2]
+        if cc:
+            out[cc] = lin
+    _CAT_CACHE = out
+    return out
+
+def linea_de(cc):
+    """LINEA del centro de costo, o None si no está en el catálogo."""
+    return load_catalogo().get(str(cc).strip())
+
 
 def build_vigente_ws(sa_info: dict, spreadsheet_id: str, worksheet: str):
     """Abre la hoja vigente de TI (solo lectura) con la cuenta de servicio."""
