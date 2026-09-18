@@ -113,15 +113,19 @@ def _req_to_row(req: dict):
             req.get("tipo", ""), req.get("status", ""), req.get("monto", 0),
             json.dumps(req, ensure_ascii=False)]
 
-def _row_number(rid: str):
-    """Número de fila (1-based) de la solicitud, o None. Columna A = id."""
-    ids = _require_ws().col_values(1)  # incluye cabecera en el índice 0
-    for i, v in enumerate(ids):
-        if str(v) == str(rid):
-            return i + 1
-    return None
+# Caché de un solo rerun: evita releer la hoja completa varias veces por interacción
+# (la causa del error 429 de cuota). La app llama invalidate_cache() al inicio de cada
+# rerun; toda escritura la invalida también.
+_REQ_CACHE = None
+
+def invalidate_cache():
+    global _REQ_CACHE
+    _REQ_CACHE = None
 
 def list_requests():
+    global _REQ_CACHE
+    if _REQ_CACHE is not None:
+        return _REQ_CACHE
     out = []
     for row in _require_ws().get_all_records():
         payload = row.get("payload")
@@ -131,7 +135,15 @@ def list_requests():
             except Exception:
                 pass
         out.append({k: row.get(k) for k in SHEET_HEADERS if k != "payload"})
+    _REQ_CACHE = out
     return out
+
+def _row_number(rid: str):
+    """Número de fila (1-based) de la solicitud, o None. Deriva de la caché, sin leer la hoja."""
+    for i, r in enumerate(list_requests()):
+        if str(r.get("id")) == str(rid):
+            return i + 2  # +1 por cabecera, +1 porqué enumerate empieza en 0
+    return None
 
 def requests_for(email: str):
     email = (email or "").lower()
@@ -145,6 +157,7 @@ def get_request(rid: str):
 
 def create_request(req: dict):
     _require_ws().append_row(_req_to_row(req), value_input_option="RAW")
+    invalidate_cache()
     return req
 
 def update_request(rid: str, **changes):
@@ -156,7 +169,32 @@ def update_request(rid: str, **changes):
     if row_i is None:
         return None
     _require_ws().batch_update([{"range": f"A{row_i}:G{row_i}", "values": [_req_to_row(r)]}])
+    invalidate_cache()
     return r
+
+def bulk_update(updates):
+    """
+    Aplica varios cambios en UNA sola llamada de escritura (evita el 429 en el corte).
+    updates: lista de (rid, dict_de_cambios). Lee la hoja una vez, arma todos los rangos
+    y los manda en un solo batch_update.
+    """
+    reqs = {str(r.get("id")): r for r in list_requests()}
+    # mapa id -> número de fila (desde la caché, sin releer)
+    row_of = {}
+    for i, r in enumerate(list_requests()):
+        row_of[str(r.get("id"))] = i + 2
+    body = []
+    for rid, changes in updates:
+        rid = str(rid)
+        r = reqs.get(rid)
+        if r is None or rid not in row_of:
+            continue
+        r.update(changes)
+        body.append({"range": f"A{row_of[rid]}:G{row_of[rid]}", "values": [_req_to_row(r)]})
+    if body:
+        _require_ws().batch_update(body)
+        invalidate_cache()
+    return len(body)
 
 def new_request(user, tipo, periodo, unidad, solicitante, monto, movimiento):
     na = needs_approval(tipo, monto)
