@@ -15,6 +15,7 @@ Regla acordada:
 NO genera el archivo de carga (eso es Fase 2b: requiere resolver LINEA). Solo decide.
 """
 import copy
+import dim_equiv as de
 
 # meses del formulario (español) en orden -> índice 0..11
 FORM_MONTHS = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Set","Oct","Nov","Dic"]
@@ -30,7 +31,7 @@ def _iter_lines(mov):
 def _key(line):
     return (str(line.get("Centro de costo", "")).strip(),
             str(line.get("Partida", "")).strip(),
-            str(line.get("Dimensión", "")).strip())
+            de.normaliza_punteada(line.get("Dimensión", "")))
 
 
 def _months_of(line):
